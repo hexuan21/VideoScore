@@ -63,7 +63,7 @@ def label_query_template():
     return GENERATION_QUERY_TEMPLATE
 
 
-REGRESSION_QUERY_PROMPT = """
+REGRESSION_QUERY_TEMPLATE = """
 Suppose you are an expert in judging and evaluating the quality of AI-generated videos,
 please watch the following frames of a given video and see the text prompt for generating the video,
 then give scores from 5 different dimensions:
@@ -89,7 +89,7 @@ all the frames of video are as follows:
 
 def regression_query_template():
     
-    return REGRESSION_QUERY_PROMPT
+    return REGRESSION_QUERY_TEMPLATE
 
 
 def load_image(image_file):

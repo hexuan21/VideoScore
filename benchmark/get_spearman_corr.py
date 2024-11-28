@@ -14,7 +14,7 @@ def cal_spearman_correlation(
         if not result_file.startswith("eval_"):
             continue
         # result_file example: eval_video_feedback_mantisscore.json
-        model_name=result_file.split(".")[0].split("_")[-1]
+        model_name=result_file.split(f"{bench_name}_")[1].split(".")[0]
         all_res=json.load(open(f"{result_dir}/{result_file}","r"))
         all_ref_scores=[eval(item["ref"]) for item in all_res]
         all_ans_scores=[eval(item["ans"]) for item in all_res]

@@ -7,10 +7,11 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from typing import List
-from transformers import AutoProcessor
-from mantis.models.idefics2 import Idefics2ForSequenceClassification
-from datasets import load_dataset
 from datetime import datetime
+from mantis.models.qwen2_vl import Qwen2VLForSequenceClassification
+from transformers import Qwen2VLProcessor
+from qwen_vl_utils import process_vision_info
+from datasets import load_dataset
 from utils_tools import _add_to_res_file,regression_query_template
 from utils_conv import conv_templates
 
@@ -18,7 +19,7 @@ from utils_conv import conv_templates
 CONV_TEMPLATE = conv_templates["idefics_2"]
 NUM_ASPECT = 5
 ROUND_DIGIT = 3
-MAX_NUM_FRAMES = 24
+FPS = 8.0
 BENCH_NAMES=["video_feedback","eval_crafter","vbench","genaibench"]
 REGRESSION_QUERY_TEMPLATE = regression_query_template()
 
@@ -35,74 +36,77 @@ def _read_video_frames(
 
 
 def _model_output(
-    model: Idefics2ForSequenceClassification,
-    processor: AutoProcessor,
+    model: Qwen2VLForSequenceClassification,
+    processor: Qwen2VLProcessor,
     video_prompt: str, 
     frames_path_list: List[str],
 ):
+    messages = [
+        {
+            "role": "user",
+            "content": [],
+        }
+    ]
     
-    video_frames=_read_video_frames(frames_path_list,MAX_NUM_FRAMES)
+    messages[0]["content"].append({"type": "video", "video": frames_path_list, "fps":FPS})
+    messages[0]["content"].append({"type": "text", "text": REGRESSION_QUERY_TEMPLATE.format(text_prompt=video_prompt)})
+    
+    # Preparation for inference
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    image_inputs, video_inputs = process_vision_info(messages)
+    inputs = processor(
+        text=[text],
+        images=image_inputs,
+        videos=video_inputs,
+        padding=True,
+        return_tensors="pt",
+    )
+    inputs = inputs.to("cuda")
+    # print(inputs['input_ids'].shape)
 
-    frames = [Image.fromarray(x) for x in video_frames]
-    eval_prompt = REGRESSION_QUERY_TEMPLATE.format(text_prompt=video_prompt)
-    num_image_token = eval_prompt.count("<image>")
-    if num_image_token < len(frames):
-        eval_prompt += "<image> " * (len(frames) - num_image_token)
-    
-    if not eval_prompt:
-        print("Please provide a prompt")
-        return
-    if not [frames]:
-        frames = None
-    
-    flatten_images = []
-    for x in [frames]:
-        if isinstance(x, list):
-            flatten_images.extend(x)
-        else:
-            flatten_images.append(x)
-    flatten_images = [Image.open(x) if isinstance(x, str) else x for x in flatten_images]
-    inputs = processor(text=eval_prompt, images=flatten_images, return_tensors="pt")
-
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-    
+    # Inference
     with torch.no_grad():
         outputs = model(**inputs)
-    
+
     logits = outputs.logits
     num_aspects = logits.shape[-1]
-    
+
     aspect_scores = []
     for i in range(num_aspects):
         aspect_scores.append(round(logits[0, i].item(),ROUND_DIGIT))
+    
     return aspect_scores
 
 
 def main(
-    model_repo_name: str="TIGER-Lab/VideoScore",
+    model_repo_name: str="TIGER-Lab/VideoScore-Qwen2-VL",
     data_repo_name: str="TIGER-Lab/VideoScore-Bench",
     frames_dir: str="../data/video_feedback/test", 
     name_postfixs: List[str]=['video_feedback'], 
-    result_file: str="./eval_results/video_feedback/eval_video_feedback_videoscore.json",
+    result_file: str="./eval_results/video_feedback/eval_video_feedback_videoscore_qwen2_vl.json",
     bench_name: str="video_feedback",
 ):
     '''
-    evalualte VideoScore model on VideoScore-Bench which contains four benchmarks, save results to 'result_file' 
+    evalualte VideoScore-Qwen2-VL model on VideoScore-Bench which contains four benchmarks, save results to 'result_file' 
     and calculate spearman correlation coefficient between human-annotated references and model output.
     '''
     
     logging.basicConfig(level=logging.INFO)
     logger= logging.getLogger(__name__)
     date_time=datetime.now().strftime("%m-%d %H:%M:%S")
-    log_file=f"./logs/{bench_name}/eval_videoscore_on_{bench_name}_{date_time}.log"
+    log_file=f"./logs/{bench_name}/eval_videoscore_qwen2_vl_on_{bench_name}_{date_time}.log"
     os.makedirs(os.path.dirname(log_file),exist_ok=True)
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
     logger.addHandler(file_handler)
     
-    processor = AutoProcessor.from_pretrained(model_repo_name,torch_dtype=torch.bfloat16)
-    model = Idefics2ForSequenceClassification.from_pretrained(model_repo_name,torch_dtype=torch.bfloat16).eval()
+    processor = Qwen2VLProcessor.from_pretrained(model_repo_name)
+    model = Qwen2VLForSequenceClassification.from_pretrained(
+        model_repo_name, torch_dtype="auto", device_map="auto", attn_implementation="flash_attention_2"
+    )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     logger.info("processor and model loaded")

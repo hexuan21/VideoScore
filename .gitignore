@@ -160,8 +160,12 @@ cython_debug/
 #.idea/
 
 /benchmark/logs/
-/benchmark/eval_results/
+/benchmark/eval_results*/
 /benchmark/__pycache__/
+
+/benchmark/eval_videoscore_qwen2_vl.*/
+
+/examples/run_videoscore_qwen2_vl.py/
 
 /data/video_feedback/
 /data/eval_crafter/

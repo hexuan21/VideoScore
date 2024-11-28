@@ -3,6 +3,7 @@ import numpy as np
 from typing import List
 from PIL import Image
 import torch
+import time
 from transformers import AutoProcessor
 from mantis.models.idefics2 import Idefics2ForSequenceClassification
 
@@ -21,7 +22,7 @@ def _read_video_pyav(
             frames.append(frame)
     return np.stack([x.to_ndarray(format="rgb24") for x in frames])
 
-MAX_NUM_FRAMES=16
+
 ROUND_DIGIT=3
 REGRESSION_QUERY_PROMPT = """
 Suppose you are an expert in judging and evaluating the quality of AI-generated videos,
@@ -47,7 +48,15 @@ For this video, the text prompt is "{text_prompt}",
 all the frames of video are as follows:
 """
 
-model_name="TIGER-Lab/VideoScore"
+# MAX_NUM_FRAMES=16
+# model_name="TIGER-Lab/VideoScore"
+
+# =======================================
+# we support 48 frames in VideoScore-v1.1
+# =======================================
+MAX_NUM_FRAMES=48
+model_name="TIGER-Lab/VideoScore-v1.1"
+
 video_path="video1.mp4"
 video_prompt="Near the Elephant Gate village, they approach the haunted house at night. Rajiv feels anxious, but Bhavesh encourages him. As they reach the house, a mysterious sound in the air adds to the suspense."
 
@@ -57,7 +66,7 @@ model = Idefics2ForSequenceClassification.from_pretrained(model_name,torch_dtype
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
 
-# sample uniformly 8 frames from the video
+# sample frames uniformly from the video
 container = av.open(video_path)
 total_frames = container.streams.video[0].frames
 if total_frames > MAX_NUM_FRAMES:
@@ -77,8 +86,11 @@ for x in [frames]:
         flatten_images.extend(x)
     else:
         flatten_images.append(x)
+s_t=time.time()
 flatten_images = [Image.open(x) if isinstance(x, str) else x for x in flatten_images]
+print(f"len(flatten_images): {len(flatten_images)}")
 inputs = processor(text=eval_prompt, images=flatten_images, return_tensors="pt")
+print(f"len(inputs): {len(inputs)}")
 inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
 with torch.no_grad():
@@ -92,9 +104,16 @@ for i in range(num_aspects):
     aspect_scores.append(round(logits[0, i].item(),ROUND_DIGIT))
 print(aspect_scores)
 
+print(round(time.time()-s_t,ROUND_DIGIT))
+
 """
 model output on visual quality, temporal consistency, dynamic degree,
 text-to-video alignment, factual consistency, respectively
 
+VideoScore: 
 [2.297, 2.469, 2.906, 2.766, 2.516]
+
+VideoScore-v1.1:
+[2.328, 2.484, 2.562, 1.969, 2.594]
 """
+

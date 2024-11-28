@@ -1,9 +1,6 @@
-cd ./data
-
-
 # bench_name=video_feedback
-# bench_name=genaibench
 bench_name=eval_crafter
+# bench_name=genaibench
 # bench_name=vbench
 
 repo_id=TIGER-Lab/VideoScore-Bench
